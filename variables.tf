@@ -1,0 +1,73 @@
+# AWS Configuration
+variable "aws_region" {
+  description = "AWS region where the validator node will be deployed"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "vpc_id" {
+  description = "ID of the VPC where the validator node will be deployed"
+  type        = string
+}
+
+variable "public_subnet_id" {
+  description = "ID of the public subnet for the validator node"
+  type        = string
+}
+
+# Instance Configuration
+variable "instance_type" {
+  description = "EC2 instance type for the validator node"
+  type        = string
+  default     = "c6i.4xlarge"
+}
+
+variable "public_key_path" {
+  description = "Path to SSH public key file for EC2 instance access"
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+}
+
+# Storage Configuration
+variable "root_volume_gb" {
+  description = "Size of the root EBS volume in GB"
+  type        = number
+  default     = 50
+}
+
+variable "data_volume_gb" {
+  description = "Size of the data EBS volume in GB (Hyperliquid generates ~100-200GB/day)"
+  type        = number
+  default     = 8000  # ~40 days at 200GB/day
+}
+
+# Logging Configuration
+variable "enable_tcpdump" {
+  description = "Enable continuous tcpdump capture (for research/debugging)"
+  type        = bool
+  default     = false
+}
+
+variable "write_trades" {
+  description = "Enable writing trade data logs"
+  type        = bool
+  default     = false
+}
+
+variable "write_order_statuses" {
+  description = "Enable writing order status logs"
+  type        = bool
+  default     = false
+}
+
+variable "write_events" {
+  description = "Enable writing misc event logs"
+  type        = bool
+  default     = false
+}
+
+variable "debug_mode" {
+  description = "Enable debug mode (prevents auto-shutdown on failure)"
+  type        = bool
+  default     = false
+}
