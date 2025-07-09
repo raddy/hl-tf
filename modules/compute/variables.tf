@@ -126,6 +126,28 @@ variable "debug_mode" {
   default     = false
 }
 
+variable "scripts_bucket_name" {
+  description = "S3 bucket containing the scripts"
+  type        = string
+}
+
+variable "scripts_version" {
+  description = "Version of scripts to use"
+  type        = string
+  default     = "latest"
+}
+
+variable "iam_instance_profile_name" {
+  description = "IAM instance profile name"
+  type        = string
+}
+
+variable "backup_bucket_name" {
+  description = "S3 bucket name for backups"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Additional tags to apply to resources"
   type        = map(string)

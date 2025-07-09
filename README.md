@@ -1,6 +1,6 @@
 # Hyperliquid Non-Validator Node
 
-Deploy a Hyperliquid non-validator node on AWS EC2 using Terraform.
+Deploy a Hyperliquid non-validator node on AWS EC2 using Terraform with S3-based script management.
 
 ## Requirements
 
@@ -35,6 +35,9 @@ Deploy a Hyperliquid non-validator node on AWS EC2 using Terraform.
    # Check data is being written to the correct volume
    df -h /var/hl
    ls -la /var/hl/
+   
+   # Check pcap rotation (if tcpdump enabled)
+   check-pcap-rotation
    ```
 
 ## What This Deploys
@@ -47,12 +50,15 @@ Deploy a Hyperliquid non-validator node on AWS EC2 using Terraform.
 
 ## Key Features
 
+- **S3-based script management**: Scripts stored in S3 for easy updates without rebuilding
+- **Continuous backup**: Optional automatic backup to S3 with intelligent file naming for correlation
 - **Data goes to the right place**: Symlinks `/root/hl` → `/var/hl` so all blockchain data is stored on the dedicated volume
 - **Modular setup**: Separate scripts for each setup phase with proper error handling
 - **Configurable logging**: Choose which data to log (trades, order statuses, events)
 - **Optional packet capture**: tcpdump with hourly rotation for network research
 - **Security**: GPG verification of binaries with retry logic
 - **Failure handling**: Any setup error triggers instance shutdown (unless debug_mode=true)
+- **Easy updates**: Run `sudo hl-update` to get latest scripts from S3
 
 ## Security Warning
 
@@ -82,12 +88,57 @@ enable_tcpdump = true  # Capture network traffic (hourly rotation, 7 day retenti
 debug_mode = true  # Keep instance running on setup failure for debugging
 ```
 
+### Continuous Backup
+```hcl
+enable_backup = true  # Enable automatic backup to S3
+```
+
+When enabled:
+- Creates dedicated S3 buckets for backup data
+- Runs hourly backup service (no downtime)
+- Only backs up completed files (65+ minutes old)
+- Skips current hour to avoid partial data
+- Intelligent file naming for pcap/event correlation
+- Backup structure: `{node-id}/{data-type}/{date}/{timestamp}.gz`
+- Lifecycle policies: 30 days → Glacier, 90 days → Deep Archive
+- Monitor backup: `sudo journalctl -u hl-backup -f`
+
 ## Data Growth Warning
 
 Hyperliquid nodes generate 100-200GB of data per day. Plan your volume size accordingly:
 - 500GB = ~2-5 days
 - 1TB = ~5-10 days
 - 8TB = ~40-80 days
+
+## Updating Scripts
+
+After deployment, you can update scripts without rebuilding:
+
+```bash
+# On the instance
+sudo hl-update        # Update to latest version
+sudo hl-update v1.0.2 # Update to specific version
+```
+
+## Analyzing Data - Correlating Events with Network Traffic
+
+A helper script is provided to download and correlate pcap captures with trading events:
+
+```bash
+# Download correlated data for a specific hour
+./scripts/correlate-events.sh <backup-bucket> <date> <hour>
+
+# Example
+./scripts/correlate-events.sh hl-node-backup-123456789012 20250107 14
+```
+
+This downloads:
+- Network captures (pcaps) for the specified hour
+- Corresponding trade data
+- Order status updates
+- Misc events
+
+All files are timestamped to allow correlation between network packets and application events.
 
 ## Destroy
 
