@@ -16,10 +16,21 @@ output "ssh_command" {
 output "setup_commands" {
   description = "Commands to run after SSHing in"
   value = {
-    check_status = "sudo systemctl status hl-node"
-    view_logs    = "sudo journalctl -u hl-node -f"
+    check_status = "sudo systemctl status hyperliquid"
+    view_logs    = "sudo journalctl -u hyperliquid -f"
     check_data   = "df -h /var/hl && ls -la /var/hl/"
+    update_scripts = "sudo hl-update"
   }
+}
+
+output "scripts_bucket" {
+  description = "S3 bucket containing the scripts"
+  value       = module.scripts.scripts_bucket_name
+}
+
+output "backup_bucket" {
+  description = "S3 bucket for continuous backups"
+  value       = var.enable_backup ? module.backup[0].backup_bucket_name : "Not enabled"
 }
 
 output "deployment_info" {

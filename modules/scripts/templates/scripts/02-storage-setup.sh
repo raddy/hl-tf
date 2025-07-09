@@ -5,28 +5,46 @@ set -euo pipefail
 
 echo "[$(date)] Step 2: Storage setup - mounting data volume..."
 
-# Wait for device to be available
-while [ ! -e /dev/nvme1n1 ]; do 
-    echo "[$(date)] Waiting for data volume /dev/nvme1n1..."
-    sleep 1
+# Find the data volume device
+echo "[$(date)] Looking for data volume..."
+DATA_DEVICE=""
+for device in /dev/nvme1n1 /dev/xvdf /dev/sdf; do
+    if [ -b "$device" ]; then
+        DATA_DEVICE="$device"
+        echo "[$(date)] Found data device: $DATA_DEVICE"
+        break
+    fi
+done
+
+# Wait if no device found yet
+while [ -z "$DATA_DEVICE" ]; do
+    echo "[$(date)] Waiting for data volume to attach..."
+    sleep 2
+    for device in /dev/nvme1n1 /dev/xvdf /dev/sdf; do
+        if [ -b "$device" ]; then
+            DATA_DEVICE="$device"
+            echo "[$(date)] Found data device: $DATA_DEVICE"
+            break
+        fi
+    done
 done
 
 # Format if needed (will fail if already formatted, which is fine)
-mkfs -t xfs /dev/nvme1n1 2>/dev/null || true
+mkfs -t xfs "$DATA_DEVICE" 2>/dev/null || true
 
 # Create mount point
 mkdir -p /var/hl
 
 # Mount the volume (check if already mounted)
 if ! mountpoint -q /var/hl; then
-    mount /dev/nvme1n1 /var/hl
+    mount "$DATA_DEVICE" /var/hl
 else
     echo "[$(date)] Volume already mounted at /var/hl"
 fi
 
 # Add to fstab for persistence (if not already there)
-if ! grep -q "/dev/nvme1n1 /var/hl" /etc/fstab; then
-    echo "/dev/nvme1n1 /var/hl xfs defaults,nofail 0 2" >> /etc/fstab
+if ! grep -q "$DATA_DEVICE /var/hl" /etc/fstab; then
+    echo "$DATA_DEVICE /var/hl xfs defaults,nofail 0 2" >> /etc/fstab
 fi
 
 echo "[$(date)] Creating directory structure..."
