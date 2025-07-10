@@ -48,6 +48,8 @@ locals {
     "05-start-service.sh"    = file("${path.module}/templates/scripts/05-start-service.sh")
     "06-monitoring-setup.sh" = file("${path.module}/templates/scripts/06-monitoring-setup.sh")
     "07-backup-setup.sh"     = var.enable_backup ? file("${path.module}/templates/scripts/07-backup-setup.sh") : ""
+    "tcpdump-wrapper.sh"     = var.enable_tcpdump ? file("${path.module}/templates/scripts/tcpdump-wrapper.sh") : ""
+    "hl-backup.sh"           = var.enable_backup ? file("${path.module}/templates/scripts/hl-backup.sh") : ""
   }
 }
 

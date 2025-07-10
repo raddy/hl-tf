@@ -84,7 +84,7 @@ resource "aws_instance" "validator" {
     })
   }
 
-  user_data = templatefile("${path.module}/templates/bootstrap.sh", {
+  user_data = templatefile("${path.module}/templates/bootstrap-fixed.sh", {
     scripts_bucket         = var.scripts_bucket_name
     scripts_version        = var.scripts_version
     aws_region            = data.aws_region.current.name
@@ -98,6 +98,13 @@ resource "aws_instance" "validator" {
   })
   
   iam_instance_profile = var.iam_instance_profile_name
+  
+  # Enable both IMDSv1 and IMDSv2 for compatibility
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "optional"  # Allow both v1 and v2
+    http_put_response_hop_limit = 1
+  }
 
   tags = merge(local.tags, {
     Name         = "${local.name_prefix}-validator"
