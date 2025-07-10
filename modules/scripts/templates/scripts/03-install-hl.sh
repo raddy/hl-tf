@@ -3,59 +3,57 @@
 
 set -euo pipefail
 
-echo "[$(date)] Step 3: Installing hl-visor..."
+# Ensure proper PATH
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 
+echo "[$(date)] Step 3: Installing hl-visor"
 cd /usr/local/bin
 
-# Check if hl-visor already exists
-if [ -f hl-visor ]; then
-    echo "[$(date)] hl-visor already exists, skipping download"
-else
-    # Download hl-visor
+# Download hl-visor if needed
+if [ ! -f hl-visor ]; then
     echo "[$(date)] Downloading hl-visor binary..."
-    if ! curl -L -o hl-visor https://binaries.hyperliquid.xyz/Mainnet/hl-visor; then
-        echo "[$(date)] ERROR: Failed to download hl-visor"
-        exit 1
+    for i in 1 2 3; do
+        if timeout 120 curl -L -o hl-visor https://binaries.hyperliquid.xyz/Mainnet/hl-visor; then
+            # Verify file size (should be > 1MB)
+            SIZE=$(stat -c%s hl-visor 2>/dev/null || echo 0)
+            if [ $SIZE -gt 1000000 ]; then
+                echo "[$(date)] Download successful (size: $((SIZE/1024/1024))MB)"
+                break
+            else
+                echo "[$(date)] ERROR: Downloaded file too small ($SIZE bytes)"
+                rm -f hl-visor
+            fi
+        fi
+        [ $i -lt 3 ] && { echo "[$(date)] Retry $i/3 failed, waiting..."; sleep $((5 * i)); } || { echo "[$(date)] ERROR: Download failed after 3 attempts"; exit 1; }
+    done
+fi
+
+# Download signature
+echo "[$(date)] Downloading signature file..."
+for i in 1 2 3; do
+    if timeout 60 curl -L -o hl-visor.asc https://binaries.hyperliquid.xyz/Mainnet/hl-visor.asc; then
+        if [ -s hl-visor.asc ]; then
+            break
+        else
+            echo "[$(date)] ERROR: Signature file is empty"
+            rm -f hl-visor.asc
+        fi
     fi
-fi
+    [ $i -lt 3 ] && { echo "[$(date)] Retry $i/3 failed, waiting..."; sleep $((5 * i)); } || { echo "[$(date)] ERROR: Signature download failed"; exit 1; }
+done
 
-# Download GPG signature file
-echo "[$(date)] Downloading hl-visor signature file..."
-if ! curl -L -o hl-visor.asc https://binaries.hyperliquid.xyz/Mainnet/hl-visor.asc; then
-    echo "[$(date)] ERROR: Failed to download signature file"
-    exit 1
-fi
-
-# Import the bundled Hyperliquid public key
-echo "[$(date)] Importing bundled Hyperliquid GPG key..."
+# Import GPG key
 KEY_ID="CF2C2EA3DC3E8F042A55FB6503254A9349F1820B"
-if ! gpg --list-keys "$KEY_ID" >/dev/null 2>&1; then
-    if ! gpg --import /var/lib/cloud/instance/scripts/hl-pub-key.asc; then
-        echo "[$(date)] ERROR: Failed to import GPG key!"
-        echo "[$(date)] Current GPG keys:"
-        gpg --list-keys
-        exit 1
-    fi
-    echo "[$(date)] GPG key imported successfully"
-else
-    echo "[$(date)] GPG key already imported"
-fi
+KEY_FILE="/var/lib/cloud/instance/scripts/hl-pub-key.asc"
+[ ! -f "$KEY_FILE" ] && { echo "[$(date)] ERROR: GPG key not found"; exit 1; }
+gpg --list-keys "$KEY_ID" &>/dev/null || gpg --import "$KEY_FILE" || exit 1
 
-# Now verify the binary using the detached signature
-echo "[$(date)] Verifying hl-visor binary with detached signature..."
-if ! gpg --verify hl-visor.asc hl-visor; then
-    echo "[$(date)] ERROR: GPG verification failed!"
-    echo "[$(date)] This is a security risk - the binary may have been tampered with"
-    exit 1
-fi
+# Verify signature
+gpg --verify hl-visor.asc hl-visor &>/dev/null || { echo "[$(date)] ERROR: GPG verification failed"; exit 1; }
 
 echo "[$(date)] GPG verification successful"
 
-# Make executable
 chmod +x hl-visor
-
-# Clean up signature files
 rm -f hl-visor.asc
 
-echo "[$(date)] hl-visor installation completed"
-echo "[$(date)] Note: hl-node will be downloaded automatically by hl-visor on first run"
+echo "[$(date)] ✓ hl-visor installed (hl-node will be downloaded on first run)"

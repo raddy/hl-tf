@@ -21,6 +21,7 @@ module "scripts" {
   environment     = var.environment
   scripts_version = "1.0.0"
   enable_backup   = var.enable_backup
+  enable_tcpdump  = var.enable_tcpdump
 }
 
 # Backup Module - S3 buckets for continuous backup

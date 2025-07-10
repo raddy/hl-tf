@@ -3,9 +3,14 @@
 
 set -euo pipefail
 
-echo "[$(date)] Step 6: Setting up monitoring..."
+# Ensure proper PATH
+export PATH="/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:$PATH"
 
-# Set up log rotation for hyperliquid
+echo "[$(date)] Step 6: Monitoring setup"
+
+[ -z "$ENABLE_TCPDUMP" ] && ENABLE_TCPDUMP="false"
+
+# Log rotation
 cat > /etc/logrotate.d/hyperliquid <<'EOF'
 /var/hl/data/**/*.log {
     daily
@@ -25,27 +30,14 @@ if [ "$ENABLE_TCPDUMP" = "true" ]; then
     # Create pcap directory
     mkdir -p /var/hl/pcap
     
-    # Create tcpdump wrapper script
-    cat > /usr/local/bin/tcpdump-wrapper.sh <<'EOF'
-#!/bin/bash
-# Wrapper script for tcpdump with proper rotation
-
-cd /var/hl/pcap || exit 1
-
-# Clean up any incomplete pcap files from previous runs
-rm -f capture-*.pcap.tmp 2>/dev/null
-
-# Start tcpdump with rotation
-# -G 3600: rotate every hour (3600 seconds)
-# -w capture-%Y%m%d-%H%M%S.pcap: filename with strftime format
-# -z gzip: compress completed files (optional, remove if you want uncompressed)
-# Note: %s in filename is required for -G to work properly
-exec /usr/bin/tcpdump -i any \
-    -w 'capture-%Y%m%d-%H%M%S.pcap' \
-    -G 3600 \
-    -Z root
-EOF
-    chmod +x /usr/local/bin/tcpdump-wrapper.sh
+    # Copy tcpdump wrapper script from downloaded scripts
+    if [ -f /var/lib/cloud/instance/scripts/tcpdump-wrapper.sh ]; then
+        cp /var/lib/cloud/instance/scripts/tcpdump-wrapper.sh /usr/local/bin/
+        chmod +x /usr/local/bin/tcpdump-wrapper.sh
+    else
+        echo "[$(date)] ERROR: tcpdump-wrapper.sh not found in scripts directory"
+        exit 1
+    fi
     
     # Create tcpdump service
     cat > /etc/systemd/system/hl-tcpdump.service <<'EOF'
@@ -55,6 +47,7 @@ After=network.target
 
 [Service]
 Type=simple
+User=root
 ExecStart=/usr/local/bin/tcpdump-wrapper.sh
 Restart=always
 RestartSec=10
@@ -119,25 +112,67 @@ EOF
     chmod +x /usr/local/bin/check-pcap-rotation
 
     # Enable and start tcpdump
-    systemctl daemon-reload
-    systemctl enable hl-tcpdump
-    systemctl start hl-tcpdump
-    
-    # Wait a moment for service to start
-    sleep 2
+    systemctl daemon-reload || exit 1
+    systemctl enable hl-tcpdump || exit 1
+    systemctl start hl-tcpdump || { journalctl -u hl-tcpdump -n 20 --no-pager; exit 1; }
+    sleep 3
     
     if systemctl is-active --quiet hl-tcpdump; then
         echo "[$(date)] tcpdump service started successfully"
         
-        # Run initial check
-        echo "[$(date)] Initial pcap rotation check:"
+        echo "[$(date)] ✓ tcpdump service started"
         /usr/local/bin/check-pcap-rotation
     else
         echo "[$(date)] WARNING: tcpdump service failed to start"
         journalctl -u hl-tcpdump -n 20 --no-pager
     fi
 else
-    echo "[$(date)] tcpdump capture disabled"
+    echo "[$(date)] tcpdump disabled"
 fi
 
-echo "[$(date)] Monitoring setup completed"
+# Set up monitoring helper script
+echo "[$(date)] Creating monitoring helper script..."
+cat > /usr/local/bin/hl-monitor <<'EOF'
+#!/bin/bash
+# Quick monitoring script for Hyperliquid node
+
+echo "=== Hyperliquid Node Status ==="
+echo "Time: $(date)"
+echo ""
+
+echo "Service Status:"
+systemctl is-active hyperliquid && echo "✓ hyperliquid: active" || echo "✗ hyperliquid: inactive"
+[ -f /etc/systemd/system/hl-tcpdump.service ] && (systemctl is-active hl-tcpdump && echo "✓ hl-tcpdump: active" || echo "✗ hl-tcpdump: inactive")
+[ -f /etc/systemd/system/hl-backup.service ] && (systemctl is-active hl-backup && echo "✓ hl-backup: active" || echo "✗ hl-backup: inactive")
+
+echo ""
+echo "Data Volume Usage:"
+df -h /var/hl
+
+echo ""
+echo "Data Directory:"
+if [ -d /var/hl/data ]; then
+    echo "Recent activity:"
+    find /var/hl/data -type f -mmin -60 -name "*" 2>/dev/null | head -10
+    echo ""
+    echo "Data size by type:"
+    du -sh /var/hl/data/* 2>/dev/null | head -10
+else
+    echo "No data directory found yet"
+fi
+
+if [ -d /var/hl/pcap ]; then
+    echo ""
+    echo "PCAP Status:"
+    ls -lh /var/hl/pcap/*.pcap 2>/dev/null | tail -5 || echo "No pcap files yet"
+fi
+
+echo ""
+echo "Recent Logs (last 10 lines):"
+journalctl -u hyperliquid -n 10 --no-pager
+EOF
+
+chmod +x /usr/local/bin/hl-monitor
+echo "[$(date)] Monitoring helper created at /usr/local/bin/hl-monitor"
+
+echo "[$(date)] ✓ Monitoring configured (hl-monitor for status)"

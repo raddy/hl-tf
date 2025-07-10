@@ -21,3 +21,9 @@ variable "enable_backup" {
   type        = bool
   default     = false
 }
+
+variable "enable_tcpdump" {
+  description = "Enable continuous tcpdump capture (for research/debugging)"
+  type        = bool
+  default     = false
+}
