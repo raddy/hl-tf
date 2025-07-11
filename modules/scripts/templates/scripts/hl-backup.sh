@@ -92,6 +92,9 @@ backup_hourly_data() {
     local last_backup=$(get_last_backup "$dir_name")
     local last_backup_epoch=$(date -d "$last_backup" +%s 2>/dev/null || echo 0)
     
+    # Track if we backed up any files
+    local backed_up_files=0
+    
     # Process each date directory
     for date_dir in "$full_path"/2*; do
         [ -d "$date_dir" ] || continue
@@ -127,10 +130,44 @@ backup_hourly_data() {
                 
                 log "Backing up $dir_name/$date_name/$hour ($file_size)..."
                 
-                if gzip -c "$hour_file" | aws s3 cp - "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=${dir_name},date=${date_name},hour=${hour}"; then
-                    log "✓ Uploaded $s3_key"
+                # For large files, use multipart upload with progress
+                local temp_file="/tmp/${date_name}_${hour}.gz"
+                log "  Compressing to $temp_file with maximum compression..."
+                if gzip -9 -c "$hour_file" > "$temp_file"; then
+                    local compressed_size=$(ls -lh "$temp_file" | awk '{print $5}')
+                    log "  Compressed size: $compressed_size, uploading..."
+                    
+                    # Upload with multipart, progress, and retry
+                    local upload_success=0
+                    for attempt in 1 2 3; do
+                        if aws s3 cp "$temp_file" "s3://${BACKUP_BUCKET}/$s3_key" \
+                            --metadata "node=${NODE_ID},type=${dir_name},date=${date_name},hour=${hour}" \
+                            --storage-class STANDARD_IA \
+                            --no-progress; then
+                            upload_success=1
+                            break
+                        else
+                            log "  Upload attempt $attempt failed, retrying..."
+                            sleep $((attempt * 10))
+                        fi
+                    done
+                    
+                    rm -f "$temp_file"
+                    
+                    if [ "$upload_success" -eq 1 ]; then
+                        log "✓ Uploaded $s3_key"
+                        backed_up_files=$((backed_up_files + 1))
+                        # Delete the file after successful upload to save space
+                        rm -f "$hour_file"
+                        log "  Deleted local file to save space"
+                    else
+                        log "✗ Failed to upload $s3_key after 3 attempts"
+                        rmdir "$lock_file" 2>/dev/null || true
+                        return 1
+                    fi
                 else
-                    log "✗ Failed to upload $s3_key"
+                    log "✗ Failed to compress $hour_file"
+                    rm -f "$temp_file"
                     rmdir "$lock_file" 2>/dev/null || true
                     return 1
                 fi
@@ -138,7 +175,10 @@ backup_hourly_data() {
         done
     done
     
-    update_last_backup "$dir_name"
+    # Only update last backup time if we actually backed up files
+    if [ "$backed_up_files" -gt 0 ]; then
+        update_last_backup "$dir_name"
+    fi
     rmdir "$lock_file" 2>/dev/null || true
     return 0
 }
@@ -164,6 +204,9 @@ backup_pcaps() {
     local last_backup=$(get_last_backup "pcaps")
     local last_backup_epoch=$(date -d "$last_backup" +%s 2>/dev/null || echo 0)
     
+    # Track if we backed up any files
+    local backed_up_files=0
+    
     # Find completed pcap files (not the one currently being written)
     for pcap_file in "$pcap_dir"/capture-*.pcap; do
         [ -f "$pcap_file" ] || continue
@@ -173,7 +216,7 @@ backup_pcaps() {
         local file_mtime=$(stat -c %Y "$pcap_file" 2>/dev/null || echo 0)
         local age=$((now - file_mtime))
         
-        if [ "$age" -lt 3900 ]; then  # 65 minutes (hour + buffer)
+        if [ "$age" -lt 1200 ]; then  # 20 minutes (15 min rotation + 5 min buffer)
             log "Skipping $(basename "$pcap_file") (modified ${age}s ago, might still be written)"
             continue
         fi
@@ -190,10 +233,25 @@ backup_pcaps() {
             
             log "Backing up $filename..."
             
-            if gzip -c "$pcap_file" | aws s3 cp - "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=pcap,date=${date_part},time=${time_part}"; then
-                log "✓ Uploaded $s3_key"
-                # Delete old pcap to save space
-                rm -f "$pcap_file"
+            # Compress pcap with maximum compression to temp file first
+            local temp_pcap="/tmp/$(basename "$pcap_file").gz"
+            log "  Compressing pcap with maximum compression..."
+            if gzip -9 -c "$pcap_file" > "$temp_pcap"; then
+                local compressed_size=$(ls -lh "$temp_pcap" | awk '{print $5}')
+                log "  Compressed size: $compressed_size, uploading..."
+                
+                if aws s3 cp "$temp_pcap" "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=pcap,date=${date_part},time=${time_part}"; then
+                    rm -f "$temp_pcap"
+                    log "✓ Uploaded $s3_key"
+                    backed_up_files=$((backed_up_files + 1))
+                    # Delete old pcap to save space
+                    rm -f "$pcap_file"
+                else
+                    rm -f "$temp_pcap"
+                    log "✗ Failed to upload $s3_key"
+                    rmdir "$lock_file" 2>/dev/null || true
+                    return 1
+                fi
             else
                 log "✗ Failed to upload $s3_key"
                 rmdir "$lock_file" 2>/dev/null || true
@@ -202,7 +260,10 @@ backup_pcaps() {
         fi
     done
     
-    update_last_backup "pcaps"
+    # Only update last backup time if we actually backed up files
+    if [ "$backed_up_files" -gt 0 ]; then
+        update_last_backup "pcaps"
+    fi
     rmdir "$lock_file" 2>/dev/null || true
     return 0
 }
@@ -227,6 +288,9 @@ backup_replica_cmds() {
     
     local last_backup=$(get_last_backup "replica_cmds")
     local last_backup_epoch=$(date -d "$last_backup" +%s 2>/dev/null || echo 0)
+    
+    # Track if we backed up any files
+    local backed_up_files=0
     
     # Get current timestamp for comparison
     local now=$(date +%s)
@@ -280,10 +344,13 @@ backup_replica_cmds() {
             
             log "Backing up replica_cmds/$ts_name ($file_count files, $dir_size)..."
             
-            if tar czf - -C "$replica_path" "$ts_name" | aws s3 cp - "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=replica_cmds,timestamp=${ts_name},files=${file_count}"; then
+            # Use maximum compression for tar
+            if GZIP=-9 tar czf - -C "$replica_path" "$ts_name" | aws s3 cp - "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=replica_cmds,timestamp=${ts_name},files=${file_count}"; then
                 log "✓ Uploaded $s3_key"
-                # Optionally remove old data to save space
-                # rm -rf "$ts_dir"
+                backed_up_files=$((backed_up_files + 1))
+                # Remove old data to save space
+                rm -rf "$ts_dir"
+                log "  Deleted local directory to save space"
             else
                 log "✗ Failed to upload $s3_key"
                 rmdir "$lock_file" 2>/dev/null || true
@@ -292,7 +359,10 @@ backup_replica_cmds() {
         fi
     done
     
-    update_last_backup "replica_cmds"
+    # Only update last backup time if we actually backed up files
+    if [ "$backed_up_files" -gt 0 ]; then
+        update_last_backup "replica_cmds"
+    fi
     rmdir "$lock_file" 2>/dev/null || true
     return 0
 }

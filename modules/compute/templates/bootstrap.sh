@@ -129,9 +129,9 @@ cat > /usr/local/bin/hl-update <<'EOF'
 set -euo pipefail
 
 VERSION=$${1:-latest}
-BUCKET=$(aws s3 ls | grep hyperliquid-scripts | awk '{print $3}')
+BUCKET=$$(aws s3 ls | grep hyperliquid-scripts | awk '{print $$3}')
 
-echo "Updating Hyperliquid scripts to version: $VERSION"
+echo "Updating Hyperliquid scripts to version: $$VERSION"
 
 # Stop service
 systemctl stop hyperliquid
@@ -140,7 +140,7 @@ systemctl stop hyperliquid
 cp -r /var/lib/cloud/instance/scripts /var/lib/cloud/instance/scripts.backup
 
 # Download new scripts
-aws s3 cp "s3://$BUCKET/scripts/$VERSION/" /var/lib/cloud/instance/scripts/ --recursive
+aws s3 cp "s3://$$BUCKET/scripts/$$VERSION/" /var/lib/cloud/instance/scripts/ --recursive
 
 # Restart service
 systemctl start hyperliquid

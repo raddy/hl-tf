@@ -411,6 +411,9 @@ Restart=always
 RestartSec=60
 StandardOutput=journal
 StandardError=journal
+# Don't timeout - large uploads can take hours
+TimeoutStartSec=0
+TimeoutStopSec=3600
 
 [Install]
 WantedBy=multi-user.target

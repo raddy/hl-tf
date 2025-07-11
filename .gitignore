@@ -48,3 +48,6 @@ Thumbs.db
 
 # Environment variables
 .env
+
+# Local Master CLAUDE
+CLAUDE.md
