@@ -1,18 +1,42 @@
-# Required Configuration
-vpc_id           = "vpc-xxxxxxxxx"
-public_subnet_id = "subnet-xxxxxxxxx"
+# Hyperliquid Node Configuration Example
+# Copy this file to terraform.tfvars and update with your values
 
-# Optional - Defaults should work fine
-# aws_region = "ap-northeast-1"
-# instance_type  = "c6i.2xlarge"
-# public_key_path = "~/.ssh/id_rsa.pub"
-# root_volume_gb = 50
-# data_volume_gb = 500
+# AWS Region
+aws_region = "us-east-1"
 
-# Logging Configuration (default: all disabled)
-# write_trades         = true
-# write_order_statuses = true  
-# write_events         = true
+# Network Configuration (required)
+# Find your VPC ID in AWS Console under VPC Dashboard
+vpc_id = "vpc-xxxxxxxx"
 
-# Monitoring (default: disabled)
-# enable_tcpdump = true  # Enable continuous packet capture
+# Find your public subnet ID in AWS Console under VPC > Subnets
+# Make sure it's in the same availability zone and has internet access
+public_subnet_id = "subnet-xxxxxxxx"
+
+# Instance Configuration
+instance_type  = "c6i.4xlarge"  # Minimum recommended (16 vCPU, 32 GB RAM)
+data_volume_gb = 500            # Storage for blockchain data (generates 100-200GB/day)
+root_volume_gb = 50             # OS and application storage
+
+# SSH Access
+# Path to your SSH public key for accessing the instance
+public_key_path = "~/.ssh/id_rsa.pub"
+
+# Node Configuration
+write_trades         = true  # Log all trades
+write_order_statuses = true  # Log order status updates
+write_events         = true  # Log blockchain events
+
+# Optional Features
+enable_backup  = false  # Enable hourly backups to S3 (additional cost)
+enable_tcpdump = false  # Enable network packet capture (research use)
+debug_mode     = false  # Keep instance running on setup failure
+
+# Project Naming
+project_name = "hl-node"
+environment  = "main"
+
+# Tags (optional)
+tags = {
+  Project = "hyperliquid"
+  Owner   = "your-name"
+}

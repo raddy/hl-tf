@@ -84,7 +84,7 @@ resource "aws_instance" "validator" {
     })
   }
 
-  user_data = templatefile("${path.module}/templates/bootstrap-fixed.sh", {
+  user_data = templatefile("${path.module}/templates/bootstrap.sh", {
     scripts_bucket         = var.scripts_bucket_name
     scripts_version        = var.scripts_version
     aws_region            = data.aws_region.current.name

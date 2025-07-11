@@ -21,8 +21,8 @@ rotate_capture() {
         FILENAME="capture-$(date +%Y%m%d-%H%M%S).pcap"
         echo "[$(date)] Starting new capture: $FILENAME"
         
-        # Run tcpdump for 1 hour (3600 seconds)
-        timeout 3600 /usr/bin/tcpdump -i "$INTERFACE" \
+        # Run tcpdump for 15 minutes (900 seconds) to keep file sizes manageable
+        timeout 900 /usr/bin/tcpdump -i "$INTERFACE" \
             -w "$FILENAME" \
             -B 10240 \
             -s 0 \
