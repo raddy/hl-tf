@@ -49,6 +49,14 @@ else
     exit 1
 fi
 
+# Copy backup sweep script from downloaded scripts
+if [ -f /var/lib/cloud/instance/scripts/hl-backup-sweep.sh ]; then
+    cp /var/lib/cloud/instance/scripts/hl-backup-sweep.sh /usr/local/bin/hl-backup-sweep
+    chmod +x /usr/local/bin/hl-backup-sweep
+else
+    echo "[$(date)] WARNING: hl-backup-sweep.sh not found in scripts directory (optional)"
+fi
+
 # Skip the heredoc generation
 if false; then
 cat > /usr/local/bin/hl-backup <<'EOF'
@@ -406,6 +414,7 @@ Requires=hyperliquid.service
 [Service]
 Type=simple
 User=root
+Environment="PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
 ExecStart=/usr/local/bin/hl-backup $BACKUP_BUCKET
 Restart=always
 RestartSec=60
@@ -423,6 +432,54 @@ EOF
 systemctl daemon-reload || exit 1
 systemctl enable hl-backup || exit 1
 systemctl start hl-backup || { journalctl -u hl-backup -n 30 --no-pager; exit 1; }
+
+# Set up backup sweep service if script exists
+if [ -f /usr/local/bin/hl-backup-sweep ]; then
+    echo "[$(date)] Setting up backup sweep service..."
+    
+    # Create systemd service for sweep
+    cat > /etc/systemd/system/hl-backup-sweep.service <<EOF
+[Unit]
+Description=Hyperliquid Backup Sweep Service
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Environment="PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
+ExecStart=/usr/local/bin/hl-backup-sweep $BACKUP_BUCKET
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hl-backup-sweep
+Restart=on-failure
+RestartSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Create systemd timer for sweep
+    cat > /etc/systemd/system/hl-backup-sweep.timer <<EOF
+[Unit]
+Description=Hyperliquid Backup Sweep Timer
+Requires=hl-backup-sweep.service
+
+[Timer]
+# Run every 2 hours, offset by 30 minutes to avoid conflicts
+OnCalendar=00/2:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    # Enable and start the timer
+    systemctl daemon-reload
+    systemctl enable hl-backup-sweep.timer
+    systemctl start hl-backup-sweep.timer
+    
+    echo "[$(date)] ✓ Backup sweep timer enabled (runs every 2 hours)"
+fi
 
 # Verify
 sleep 3
