@@ -50,6 +50,7 @@ locals {
     "07-backup-setup.sh"     = var.enable_backup ? file("${path.module}/templates/scripts/07-backup-setup.sh") : ""
     "tcpdump-wrapper.sh"     = var.enable_tcpdump ? file("${path.module}/templates/scripts/tcpdump-wrapper.sh") : ""
     "hl-backup.sh"           = var.enable_backup ? file("${path.module}/templates/scripts/hl-backup.sh") : ""
+    "hl-backup-sweep.sh"     = var.enable_backup ? file("${path.module}/templates/scripts/hl-backup-sweep.sh") : ""
   }
 }
 

@@ -2,6 +2,14 @@
 # Continuous backup script for Hyperliquid data
 set -euo pipefail
 
+# Ensure proper PATH for systemd services (AWS CLI via snap)
+export PATH="/snap/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin"
+
+# Set AWS region from metadata
+AZ=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone)
+export AWS_DEFAULT_REGION=${AZ%?}
+export AWS_REGION=$AWS_DEFAULT_REGION
+
 BACKUP_BUCKET="$1"
 if [ -z "$BACKUP_BUCKET" ]; then
     echo "Usage: $0 <backup-bucket>"
@@ -148,7 +156,7 @@ backup_hourly_data() {
                             break
                         else
                             log "  Upload attempt $attempt failed, retrying..."
-                            sleep $((attempt * 10))
+                            sleep 5  # Quick retry
                         fi
                     done
                     
@@ -216,7 +224,7 @@ backup_pcaps() {
         local file_mtime=$(stat -c %Y "$pcap_file" 2>/dev/null || echo 0)
         local age=$((now - file_mtime))
         
-        if [ "$age" -lt 1200 ]; then  # 20 minutes (15 min rotation + 5 min buffer)
+        if [ "$age" -lt 660 ]; then  # 11 minutes (10 min rotation + 1 min buffer)
             log "Skipping $(basename "$pcap_file") (modified ${age}s ago, might still be written)"
             continue
         fi
@@ -240,20 +248,37 @@ backup_pcaps() {
                 local compressed_size=$(ls -lh "$temp_pcap" | awk '{print $5}')
                 log "  Compressed size: $compressed_size, uploading..."
                 
-                if aws s3 cp "$temp_pcap" "s3://${BACKUP_BUCKET}/$s3_key" --metadata "node=${NODE_ID},type=pcap,date=${date_part},time=${time_part}"; then
-                    rm -f "$temp_pcap"
+                # Upload with multipart, progress, and retry
+                local upload_success=0
+                for attempt in 1 2 3; do
+                    if aws s3 cp "$temp_pcap" "s3://${BACKUP_BUCKET}/$s3_key" \
+                        --metadata "node=${NODE_ID},type=pcap,date=${date_part},time=${time_part}" \
+                        --storage-class STANDARD_IA \
+                        --no-progress; then
+                        upload_success=1
+                        break
+                    else
+                        log "  Upload attempt $attempt failed, retrying..."
+                        sleep 5  # Quick retry - we're racing against time
+                    fi
+                done
+                
+                rm -f "$temp_pcap"
+                
+                if [ "$upload_success" -eq 1 ]; then
                     log "✓ Uploaded $s3_key"
                     backed_up_files=$((backed_up_files + 1))
                     # Delete old pcap to save space
                     rm -f "$pcap_file"
+                    log "  Deleted local pcap to save space"
                 else
-                    rm -f "$temp_pcap"
-                    log "✗ Failed to upload $s3_key"
+                    log "✗ Failed to upload $s3_key after 3 attempts"
                     rmdir "$lock_file" 2>/dev/null || true
                     return 1
                 fi
             else
-                log "✗ Failed to upload $s3_key"
+                log "✗ Failed to compress $pcap_file"
+                rm -f "$temp_pcap"
                 rmdir "$lock_file" 2>/dev/null || true
                 return 1
             fi
@@ -405,7 +430,7 @@ while true; do
     backup_pcaps
     backup_replica_cmds
     
-    # Sleep for 1 hour before next check
-    # This ensures files have finished writing before backup
-    sleep 3600
+    # Sleep for 10 minutes before next check
+    # Frequent runs for pcaps, but hourly data still waits for completion
+    sleep 600
 done
