@@ -1,98 +1,109 @@
-# Hyperliquid Non-Validator Node
+# Hyperliquid Node - Terraform Deployment
 
-Deploy a Hyperliquid non-validator node on AWS EC2 using Terraform.
+Terraform deployment for running a Hyperliquid non-validator node on AWS with optional backups and packet capture.
 
 ## Requirements
 
-- Terraform >= 1.5.7
-- AWS account with VPC and subnet
+- Terraform >= 1.0
+- AWS account with VPC/subnet
+- Ubuntu 24.04 (required for glibc 2.39+)
 - SSH key pair
 
 ## Quick Start
 
-1. **Clone and configure**
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   # Edit terraform.tfvars with your VPC and subnet IDs
-   ```
+```bash
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your VPC/subnet IDs
 
-2. **Deploy**
-   ```bash
-   terraform init
-   terraform apply
-   ```
+./scripts/init.sh
+./scripts/apply.sh
 
-3. **Connect**
-   ```bash
-   ssh ubuntu@<public-ip>
-   
-   # Check status
-   sudo systemctl status hyperliquid
-   
-   # View logs
-   sudo journalctl -u hyperliquid -f
-   
-   # Check data is being written to the correct volume
-   df -h /var/hl
-   ls -la /var/hl/
-   ```
+# Get IP and SSH in
+terraform output instance_public_ip
+ssh ubuntu@<ip>
 
-## What This Deploys
+# Check logs
+sudo journalctl -u hyperliquid -f
+```
 
-- **EC2 Instance**: c6i.4xlarge (default, configurable) with Ubuntu 24.04
-- **Storage**: 50GB root volume + 500GB data volume mounted at `/var/hl`
-- **Security**: Ports 4000-4010 open for Hyperliquid protocol, GPG verification of binaries
-- **Service**: hl-visor running as systemd service named 'hyperliquid' with configurable logging
-- **Monitoring**: Optional tcpdump capture with hourly rotation (stored in /var/hl/pcap/)
+## Configuration
 
-## Key Features
+Key variables in `terraform.tfvars`:
 
-- **Data goes to the right place**: Symlinks `/root/hl` → `/var/hl` so all blockchain data is stored on the dedicated volume
-- **Modular setup**: Separate scripts for each setup phase with proper error handling
-- **Configurable logging**: Choose which data to log (trades, order statuses, events)
-- **Optional packet capture**: tcpdump with hourly rotation for network research
-- **Security**: GPG verification of binaries with retry logic
-- **Failure handling**: Any setup error triggers instance shutdown (unless debug_mode=true)
+```hcl
+# Required
+vpc_id           = "vpc-xxx"
+public_subnet_id = "subnet-xxx"
 
-## Security Warning
+# Instance
+instance_type  = "c6i.4xlarge"  # 16 vCPU minimum
+data_volume_gb = 500            # ~2-5 days of data
 
-**SSH access is currently open to 0.0.0.0/0**. After deployment, update the security group to restrict SSH access to your IP only:
+# Features
+enable_backup  = true   # S3 backups
+enable_tcpdump = false  # Packet capture (warning: generates tons of data)
+```
+
+## Architecture
+
+- EC2 instance running `hl-visor` 
+- Dedicated EBS volume at `/var/hl` (symlinked from `/root/hl`)
+- Scripts managed via S3 for easy updates
+- Optional hourly S3 backups with compression
+- Optional tcpdump with 15-minute rotation
+
+## Data Volumes
+
+Expect:
+- Trading/events: 100-200GB/day
+- PCAPs: 500GB-1TB/day if enabled
+- Compression reduces by 70-90%
+
+With backups enabled, you need 15-50 Mbps upload bandwidth or backups will fall behind.
+
+## Operations
 
 ```bash
-aws ec2 modify-security-group-rules --group-id <security-group-id> \
-  --security-group-rules "SecurityGroupRuleId=<rule-id>,SecurityGroupRule={IpProtocol=tcp,FromPort=22,ToPort=22,CidrIpv4=YOUR_IP/32}"
+# On the instance
+hl-monitor              # Quick status check
+hl-backup-status        # Backup status
+sudo hl-update          # Update scripts from S3
+
+# Emergency disk cleanup
+find /var/hl/pcap -name "*.pcap" -mmin +120 -delete
 ```
 
-## Configuration Options
+## Common Issues
 
-### Logging Arguments
-```hcl
-write_trades         = true  # Log all trades
-write_order_statuses = true  # Log order status updates  
-write_events         = true  # Log misc events (uses --write-misc-events flag)
-```
+**Disk fills up**: Either disable pcaps or increase volume size. The backup script deletes local files after upload.
 
-### Monitoring
-```hcl
-enable_tcpdump = true  # Capture network traffic (hourly rotation, 7 day retention)
-```
-
-### Debug Mode
-```hcl
-debug_mode = true  # Keep instance running on setup failure for debugging
-```
-
-## Data Growth Warning
-
-Hyperliquid nodes generate 100-200GB of data per day. Plan your volume size accordingly:
-- 500GB = ~2-5 days
-- 1TB = ~5-10 days
-- 8TB = ~40-80 days
-
-## Destroy
-
+**Backup state wrong**: S3 state file tracks last backup time. Reset with:
 ```bash
-terraform destroy
+echo '{"node_trades":"2020-01-01T00:00:00Z"}' | sudo tee /var/hl/backup_state.json
 ```
 
-Note: The data volume is preserved by default (`delete_on_termination = false`)
+**Terraform bucket exists**: Import existing resources:
+```bash
+terraform import "module.backup[0].aws_s3_bucket.backup" bucket-name
+```
+
+**tcpdump crashes**: Known issue with strftime on Ubuntu 24.04, we use manual rotation as workaround.
+
+## Scripts
+
+- `./scripts/full-restart.sh` - Destroy and recreate everything
+- `./scripts/force-update-scripts.sh` - Force S3 script update
+- `./scripts/correlate-events.sh` - Download backup data for analysis
+
+## Costs
+
+- c6i.4xlarge: ~$500/month
+- 500GB EBS: ~$40/month  
+- S3: Variable based on retention
+
+## Notes
+
+- Service must be named "hyperliquid" not "hl-node" 
+- GPG verification is mandatory
+- Use `--write-misc-events` not `--write-events`
+- Backups use gzip -9 for max compression

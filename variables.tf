@@ -38,7 +38,7 @@ variable "root_volume_gb" {
 variable "data_volume_gb" {
   description = "Size of the data EBS volume in GB (Hyperliquid generates ~100-200GB/day)"
   type        = number
-  default     = 8000  # ~40 days at 200GB/day
+  default     = 500
 }
 
 # Logging Configuration
@@ -70,4 +70,30 @@ variable "debug_mode" {
   description = "Enable debug mode (prevents auto-shutdown on failure)"
   type        = bool
   default     = false
+}
+
+# Backup Configuration
+variable "enable_backup" {
+  description = "Enable continuous backup to S3"
+  type        = bool
+  default     = false
+}
+
+# Project Configuration
+variable "project_name" {
+  description = "Name of the project"
+  type        = string
+  default     = "hyperliquid"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "main"
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
 }

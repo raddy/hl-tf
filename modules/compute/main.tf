@@ -10,6 +10,8 @@ locals {
   tags = merge(var.tags, local.module_tags)
 }
 
+data "aws_region" "current" {}
+
 # Get the latest Ubuntu 24.04 AMI
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -41,61 +43,6 @@ resource "aws_key_pair" "validator" {
   })
 }
 
-# Create cloud-init config with all scripts
-locals {
-  cloud_init_config = {
-    write_files = [
-      {
-        path        = "/var/lib/cloud/instance/scripts/01-system-setup.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/01-system-setup.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/02-storage-setup.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/02-storage-setup.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/03-install-hl.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/03-install-hl.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/04-configure-hl.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/04-configure-hl.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/05-start-service.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/05-start-service.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/06-monitoring-setup.sh"
-        permissions = "0755"
-        content     = file("${path.module}/templates/scripts/06-monitoring-setup.sh")
-      },
-      {
-        path        = "/var/lib/cloud/instance/scripts/hl-pub-key.asc"
-        permissions = "0644"
-        content     = file("${path.module}/templates/scripts/hl-pub-key.asc")
-      }
-    ]
-    
-    runcmd = [
-      ["bash", "-c", templatefile("${path.module}/templates/user_data.sh", {
-        gossip_config_json   = jsonencode(var.gossip_config)
-        enable_tcpdump       = var.enable_tcpdump
-        write_trades         = var.write_trades
-        write_order_statuses = var.write_order_statuses
-        write_events         = var.write_events
-        debug_mode           = var.debug_mode
-      })]
-    ]
-  }
-  
-  user_data = "#cloud-config\n${yamlencode(local.cloud_init_config)}"
-}
 
 # EC2 Instance
 resource "aws_instance" "validator" {
@@ -137,11 +84,32 @@ resource "aws_instance" "validator" {
     })
   }
 
-  user_data = local.user_data
+  user_data = templatefile("${path.module}/templates/bootstrap.sh", {
+    scripts_bucket         = var.scripts_bucket_name
+    scripts_version        = var.scripts_version
+    aws_region            = data.aws_region.current.name
+    ebs_volume_size       = var.data_volume_size
+    write_trades          = var.write_trades
+    write_events          = var.write_events  
+    write_order_statuses  = var.write_order_statuses
+    enable_tcpdump        = var.enable_tcpdump
+    debug_mode            = var.debug_mode
+    gossip_config         = jsonencode(var.gossip_config)
+  })
+  
+  iam_instance_profile = var.iam_instance_profile_name
+  
+  # Enable both IMDSv1 and IMDSv2 for compatibility
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "optional"  # Allow both v1 and v2
+    http_put_response_hop_limit = 1
+  }
 
   tags = merge(local.tags, {
-    Name        = "${local.name_prefix}-validator"
-    Description = "Hyperliquid validator node"
+    Name         = "${local.name_prefix}-validator"
+    Description  = "Hyperliquid validator node"
+    BackupBucket = var.backup_bucket_name != "" ? var.backup_bucket_name : "none"
   })
 
   lifecycle {
