@@ -1,42 +1,39 @@
-# Hyperliquid Node Configuration Example
-# Copy this file to terraform.tfvars and update with your values
+# Example Terraform variables file
+# Copy this to terraform.tfvars and customize for your deployment
 
-# AWS Region
+# Required: AWS region where the node will be deployed
 aws_region = "us-east-1"
 
-# Network Configuration (required)
-# Find your VPC ID in AWS Console under VPC Dashboard
-vpc_id = "vpc-xxxxxxxx"
+# Required: VPC and subnet where the node will be deployed
+vpc_id           = "vpc-xxxxxxxxx"
+public_subnet_id = "subnet-xxxxxxxxx"
 
-# Find your public subnet ID in AWS Console under VPC > Subnets
-# Make sure it's in the same availability zone and has internet access
-public_subnet_id = "subnet-xxxxxxxx"
+# Required: CIDR blocks allowed SSH access
+# IMPORTANT: Replace with your actual IP address or network
+# Get your IP with: curl ifconfig.me
+allowed_ssh_cidr_blocks = [
+  "203.0.113.0/32"  # Replace with your IP/32 for single IP access
+  # "10.0.0.0/8",   # Example: Private network access
+]
 
-# Instance Configuration
-instance_type  = "c6i.4xlarge"  # Minimum recommended (16 vCPU, 32 GB RAM)
-data_volume_gb = 500            # Storage for blockchain data (generates 100-200GB/day)
-root_volume_gb = 50             # OS and application storage
+# Instance configuration
+instance_type = "c6i.4xlarge"  # Minimum recommended for Hyperliquid
 
-# SSH Access
-# Path to your SSH public key for accessing the instance
-public_key_path = "~/.ssh/id_rsa.pub"
+# Storage sizes (adjust based on expected data volume)
+root_volume_gb = 50
+data_volume_gb = 1000  # Hyperliquid can generate 100-200GB/day
 
-# Node Configuration
-write_trades         = true  # Log all trades
-write_order_statuses = true  # Log order status updates
-write_events         = true  # Log blockchain events
+# Optional: Enable features
+enable_backup   = true   # Recommended for production
+enable_tcpdump  = false  # Only enable if needed for debugging
 
-# Optional Features
-enable_backup  = false  # Enable hourly backups to S3 (additional cost)
-enable_tcpdump = false  # Enable network packet capture (research use)
-debug_mode     = false  # Keep instance running on setup failure
-
-# Project Naming
-project_name = "hl-node"
+# Optional: Custom naming
+project_name = "hyperliquid"
 environment  = "main"
 
-# Tags (optional)
+# Optional: Additional tags
 tags = {
-  Project = "hyperliquid"
-  Owner   = "your-name"
+  Owner       = "your-name"
+  Environment = "production"
+  Purpose     = "hyperliquid-validator"
 }

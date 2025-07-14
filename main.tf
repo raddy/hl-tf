@@ -49,10 +49,11 @@ module "iam" {
 module "network" {
   source = "./modules/network"
   
-  project_name = var.project_name
-  environment  = var.environment
-  vpc_id       = var.vpc_id
-  tags         = var.tags
+  project_name            = var.project_name
+  environment             = var.environment
+  vpc_id                  = var.vpc_id
+  allowed_ssh_cidr_blocks = var.allowed_ssh_cidr_blocks
+  tags                    = var.tags
 }
 
 # Compute Module - EC2 Instance

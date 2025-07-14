@@ -36,13 +36,13 @@ resource "aws_security_group" "validator" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # SSH access
+  # SSH access - restricted to specified CIDR blocks
   ingress {
     description = "SSH access"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # TODO: Restrict this to your IP
+    cidr_blocks = var.allowed_ssh_cidr_blocks
   }
 
   # Allow all outbound traffic

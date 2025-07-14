@@ -28,6 +28,15 @@ variable "public_key_path" {
   default     = "~/.ssh/id_rsa.pub"
 }
 
+variable "allowed_ssh_cidr_blocks" {
+  description = "CIDR blocks allowed SSH access to the instance. Must be specified for security."
+  type        = list(string)
+  validation {
+    condition     = length(var.allowed_ssh_cidr_blocks) > 0
+    error_message = "At least one CIDR block must be specified for SSH access. Use your IP/32 for single IP access."
+  }
+}
+
 # Storage Configuration
 variable "root_volume_gb" {
   description = "Size of the root EBS volume in GB"
