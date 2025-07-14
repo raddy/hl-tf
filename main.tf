@@ -74,12 +74,9 @@ module "compute" {
   iam_instance_profile_name = module.iam.instance_profile_name
   backup_bucket_name        = var.enable_backup ? module.backup[0].backup_bucket_name : ""
   gossip_config = {
-    chain = "Mainnet"
+    chain = var.hyperliquid_chain
     root_node_ips = [
-      { Ip = "20.188.6.225" },
-      { Ip = "74.226.182.22" },
-      { Ip = "180.189.55.18" },
-      { Ip = "46.105.222.166" }
+      for ip in var.hyperliquid_root_nodes : { Ip = ip }
     ]
     try_new_peers = true
   }

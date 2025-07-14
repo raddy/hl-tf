@@ -78,22 +78,6 @@ variable "gossip_config" {
     }))
     try_new_peers = bool
   })
-  default = {
-    chain = "Mainnet"
-    root_node_ips = [
-      { Ip = "20.188.6.225" },
-      { Ip = "74.226.182.22" },
-      { Ip = "180.189.55.18" },
-      { Ip = "46.105.222.166" },
-      { Ip = "57.180.50.253" },
-      { Ip = "52.68.71.160" },
-      { Ip = "199.254.199.190" },
-      { Ip = "148.251.76.7" },
-      { Ip = "160.202.131.51" },
-      { Ip = "8.220.222.129" }
-    ]
-    try_new_peers = true
-  }
 }
 
 variable "enable_tcpdump" {
