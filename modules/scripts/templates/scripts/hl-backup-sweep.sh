@@ -57,6 +57,90 @@ check_s3_exists() {
     timeout 30 aws s3 ls "$s3_path" >/dev/null 2>&1
 }
 
+# Function to upload large files in chunks
+upload_large_file() {
+    local source_file=$1
+    local s3_key=$2
+    local chunk_size=100  # 100MB chunks
+    
+    log "  Splitting large file into ${chunk_size}MB chunks..."
+    
+    # Create temp directory for chunks
+    local temp_dir="/tmp/chunks_$(basename "$source_file")_$$"
+    mkdir -p "$temp_dir"
+    
+    # Split file into chunks and compress each
+    if split -b ${chunk_size}M "$source_file" "$temp_dir/chunk_"; then
+        log "  File split successfully, compressing and uploading chunks..."
+        
+        local chunk_count=0
+        local upload_success=true
+        
+        # Upload each chunk
+        for chunk in "$temp_dir"/chunk_*; do
+            if [ -f "$chunk" ]; then
+                local chunk_name=$(basename "$chunk")
+                local chunk_s3_key="${s3_key}.${chunk_name}"
+                
+                # Compress and upload chunk
+                if gzip -6 -c "$chunk" | timeout 1800 aws s3 cp - "s3://${BACKUP_BUCKET}/$chunk_s3_key" \
+                    --metadata "node=${NODE_ID},chunk=${chunk_name},total_chunks=pending" \
+                    --storage-class STANDARD_IA \
+                    --no-progress 2>&1 | tee -a "$LOG_FILE"; then
+                    log "    ✓ Uploaded chunk $chunk_name"
+                    chunk_count=$((chunk_count + 1))
+                else
+                    log "    ✗ Failed to upload chunk $chunk_name"
+                    upload_success=false
+                    break
+                fi
+            fi
+        done
+        
+        # Update metadata with final chunk count
+        if [ "$upload_success" = true ]; then
+            log "  Updating chunk metadata (${chunk_count} chunks total)..."
+            for chunk in "$temp_dir"/chunk_*; do
+                if [ -f "$chunk" ]; then
+                    local chunk_name=$(basename "$chunk")
+                    local chunk_s3_key="${s3_key}.${chunk_name}"
+                    
+                    # Update metadata with final chunk count
+                    aws s3 cp "s3://${BACKUP_BUCKET}/$chunk_s3_key" "s3://${BACKUP_BUCKET}/$chunk_s3_key" \
+                        --metadata "node=${NODE_ID},chunk=${chunk_name},total_chunks=${chunk_count}" \
+                        --metadata-directive REPLACE >/dev/null 2>&1 || true
+                fi
+            done
+            
+            # Create manifest file for reassembly
+            local manifest_s3_key="${s3_key}.manifest"
+            echo "# Chunked file manifest for reassembly" > "$temp_dir/manifest"
+            echo "original_file=$(basename "$source_file")" >> "$temp_dir/manifest"
+            echo "chunk_count=$chunk_count" >> "$temp_dir/manifest"
+            echo "chunk_size=${chunk_size}M" >> "$temp_dir/manifest"
+            echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$temp_dir/manifest"
+            
+            aws s3 cp "$temp_dir/manifest" "s3://${BACKUP_BUCKET}/$manifest_s3_key" \
+                --metadata "node=${NODE_ID},type=manifest,chunks=${chunk_count}" >/dev/null 2>&1 || true
+        fi
+        
+        # Clean up temp directory
+        rm -rf "$temp_dir"
+        
+        if [ "$upload_success" = true ]; then
+            log "  ✓ Large file uploaded successfully (${chunk_count} chunks)"
+            return 0
+        else
+            log "  ✗ Large file upload failed"
+            return 1
+        fi
+    else
+        log "  ✗ Failed to split large file"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+}
+
 # Function to backup any missing hourly data files
 sweep_hourly_data() {
     local dir_name=$1
@@ -93,21 +177,54 @@ sweep_hourly_data() {
             if ! check_s3_exists "s3://${BACKUP_BUCKET}/$s3_key"; then
                 log "  Found missing file: $date_name/$hour (age: $((file_age/3600))h)"
                 
-                # Compress and upload
-                local temp_file="/tmp/sweep_${date_name}_${hour}.gz"
-                if gzip -9 -c "$hour_file" > "$temp_file"; then
-                    if timeout 300 aws s3 cp "$temp_file" "s3://${BACKUP_BUCKET}/$s3_key" \
-                        --metadata "node=${NODE_ID},type=${dir_name},date=${date_name},hour=${hour},sweep=true" \
-                        --storage-class STANDARD_IA \
-                        --no-progress 2>&1 | tee -a "$LOG_FILE"; then
-                        log "  ✓ Swept up $s3_key"
+                # Check file size and use appropriate strategy
+                local file_size=$(stat -c%s "$hour_file")
+                local size_mb=$((file_size / 1024 / 1024))
+                
+                if [ $size_mb -gt 1000 ]; then
+                    log "  Large file detected (${size_mb}MB) - using chunked upload"
+                    if upload_large_file "$hour_file" "$s3_key"; then
+                        log "  ✓ Swept up $s3_key (chunked)"
                         swept_count=$((swept_count + 1))
-                        # Delete old file to save space
+                        # Only delete on confirmed successful upload
                         rm -f "$hour_file"
                     else
-                        log "  ✗ Failed to upload $s3_key - AWS error above"
+                        log "  ✗ Failed to upload large file $s3_key"
                     fi
-                    rm -f "$temp_file"
+                else
+                    # Standard upload for smaller files
+                    local temp_file="/tmp/sweep_${date_name}_${hour}.gz"
+                    if gzip -6 -c "$hour_file" > "$temp_file"; then
+                        # Increase timeout for larger files
+                        local timeout_seconds=600
+                        if [ $size_mb -gt 500 ]; then
+                            timeout_seconds=1200
+                        fi
+                        
+                        if timeout $timeout_seconds aws s3 cp "$temp_file" "s3://${BACKUP_BUCKET}/$s3_key" \
+                            --metadata "node=${NODE_ID},type=${dir_name},date=${date_name},hour=${hour},sweep=true" \
+                            --storage-class STANDARD_IA \
+                            --no-progress 2>&1 | tee -a "$LOG_FILE"; then
+                            
+                            # Verify upload by checking if file exists and has correct size
+                            local uploaded_size=$(aws s3 ls "s3://${BACKUP_BUCKET}/$s3_key" | awk '{print $3}')
+                            local temp_size=$(stat -c%s "$temp_file")
+                            
+                            if [ "$uploaded_size" = "$temp_size" ]; then
+                                log "  ✓ Swept up $s3_key (verified)"
+                                swept_count=$((swept_count + 1))
+                                # Only delete on verified successful upload
+                                rm -f "$hour_file"
+                            else
+                                log "  ✗ Upload verification failed for $s3_key (size mismatch)"
+                            fi
+                        else
+                            log "  ✗ Failed to upload $s3_key - AWS error above"
+                        fi
+                        rm -f "$temp_file"
+                    else
+                        log "  ✗ Failed to compress $hour_file"
+                    fi
                 fi
             fi
         done

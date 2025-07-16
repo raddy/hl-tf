@@ -148,12 +148,28 @@ backup_hourly_data() {
                     # Upload with multipart, progress, and retry
                     local upload_success=0
                     for attempt in 1 2 3; do
-                        if aws s3 cp "$temp_file" "s3://${BACKUP_BUCKET}/$s3_key" \
+                        # Use longer timeout for larger files
+                        local file_size=$(stat -c%s "$temp_file")
+                        local size_mb=$((file_size / 1024 / 1024))
+                        local timeout_seconds=600
+                        if [ $size_mb -gt 500 ]; then
+                            timeout_seconds=1800
+                        fi
+                        
+                        if timeout $timeout_seconds aws s3 cp "$temp_file" "s3://${BACKUP_BUCKET}/$s3_key" \
                             --metadata "node=${NODE_ID},type=${dir_name},date=${date_name},hour=${hour}" \
                             --storage-class STANDARD_IA \
                             --no-progress; then
-                            upload_success=1
-                            break
+                            
+                            # Verify upload by checking size
+                            local uploaded_size=$(aws s3 ls "s3://${BACKUP_BUCKET}/$s3_key" | awk '{print $3}')
+                            if [ "$uploaded_size" = "$file_size" ]; then
+                                upload_success=1
+                                break
+                            else
+                                log "  Upload verification failed (size mismatch), retrying..."
+                                sleep 5
+                            fi
                         else
                             log "  Upload attempt $attempt failed, retrying..."
                             sleep 5  # Quick retry
@@ -163,9 +179,9 @@ backup_hourly_data() {
                     rm -f "$temp_file"
                     
                     if [ "$upload_success" -eq 1 ]; then
-                        log "✓ Uploaded $s3_key"
+                        log "✓ Uploaded $s3_key (verified)"
                         backed_up_files=$((backed_up_files + 1))
-                        # Delete the file after successful upload to save space
+                        # Only delete the file after verified successful upload
                         rm -f "$hour_file"
                         log "  Deleted local file to save space"
                     else
