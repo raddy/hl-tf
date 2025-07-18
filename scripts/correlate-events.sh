@@ -29,10 +29,10 @@ WORK_DIR="./hl-analysis/${DATE}/${HOUR}"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Download pcaps for the hour (now in 15-minute chunks)
+# Download pcaps for the hour (10-minute rotation files)
 echo -e "\n${YELLOW}Downloading pcap captures for hour ${HOUR}...${NC}"
 PCAP_PREFIX="${NODE_ID}/pcaps/${DATE}"
-# Match all 15-minute segments for the requested hour (00, 15, 30, 45)
+# Match all captures for the requested hour (capture_YYYYMMDD-HHMMSS format)
 aws s3 ls "s3://${BACKUP_BUCKET}/${PCAP_PREFIX}/" | grep -E "capture_${DATE}-${HOUR}[0-5][0-9][0-5][0-9]\.pcap\.gz" | while read -r line; do
     file=$(echo $line | awk '{print $4}')
     echo "  Downloading $file..."
@@ -78,7 +78,7 @@ fi
 
 echo -e "\n${GREEN}Data ready for analysis in: $(pwd)${NC}"
 echo -e "\n${YELLOW}Analysis suggestions:${NC}"
-echo "1. View pcap with timestamps (now multiple 15-min files):"
+echo "1. View pcap with timestamps (multiple 10-min rotation files):"
 echo "   for f in capture_*.pcap; do echo \"=== \$f ===\"; tcpdump -tttt -r \$f | head -20; done"
 echo ""
 echo "2. Merge all pcaps for the hour:"
@@ -89,7 +89,7 @@ echo "   for f in capture_*.pcap; do tcpdump -r \$f 'port >= 4000 and port <= 40
 echo ""
 echo "4. Correlate events with network traffic:"
 echo "   # Trade events in ${DATE}_${HOUR} can be matched with packet timestamps"
-echo "   # Each 15-min pcap covers part of the hour's trading activity"
+echo "   # Each pcap file covers ~10 minutes of network activity"
 echo ""
 echo "5. Convert pcaps to CSV for analysis:"
 echo "   for f in capture_*.pcap; do tshark -r \$f -T fields -e frame.time -e ip.src -e ip.dst -e tcp.port > \${f%.pcap}.csv; done"

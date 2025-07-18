@@ -6,8 +6,14 @@ locals {
 
 data "aws_caller_identity" "current" {}
 
+# Create backup bucket with lifecycle to prevent destruction
 resource "aws_s3_bucket" "backup" {
   bucket = local.bucket_name
+  
+  # Prevent accidental deletion
+  lifecycle {
+    prevent_destroy = true
+  }
   
   # Tags removed temporarily due to IAM permissions
   # tags = {
@@ -81,6 +87,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "backup" {
 # S3 bucket for storing backup state and locks
 resource "aws_s3_bucket" "backup_state" {
   bucket = "${local.bucket_name}-state"
+  
+  # Prevent accidental deletion
+  lifecycle {
+    prevent_destroy = true
+  }
   
   # Tags removed temporarily due to IAM permissions
   # tags = {

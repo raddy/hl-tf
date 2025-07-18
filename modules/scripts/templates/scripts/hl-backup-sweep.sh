@@ -42,7 +42,7 @@ debug_aws() {
         return 1
     fi
     log "  Checking S3 bucket access..."
-    if timeout 30 aws s3 ls "s3://${BACKUP_BUCKET}/" 2>&1 | head -1 | tee -a "$LOG_FILE" | grep -q "PRE\|20"; then
+    if timeout 30 aws s3 ls "s3://${BACKUP_BUCKET}/" >/dev/null 2>&1; then
         log "  S3 bucket access OK"
     else
         log "  ERROR: Cannot access S3 bucket ${BACKUP_BUCKET}"
