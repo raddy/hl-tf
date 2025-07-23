@@ -33,17 +33,29 @@ echo -e "${YELLOW}The following resources will be destroyed:${NC}"
 terraform plan -destroy -var-file="terraform.tfvars" | grep -E "will be destroyed|# aws_" || true
 
 echo ""
-echo -e "${RED}WARNING: This will destroy all resources managed by Terraform!${NC}"
-echo -e "${YELLOW}Note: The data volume will be preserved (delete_on_termination = false)${NC}"
+echo -e "${RED}WARNING: This will destroy EC2 and EBS resources!${NC}"
+echo -e "${GREEN}Note: S3 buckets and data will be preserved${NC}"
 echo ""
 echo -e "${YELLOW}Are you sure you want to destroy these resources? Type 'yes' to confirm:${NC}"
 read -r response
 
 if [ "$response" = "yes" ]; then
-    echo -e "${RED}Destroying Terraform resources...${NC}"
-    terraform destroy -var-file="terraform.tfvars"
-    echo -e "${GREEN}Resources destroyed successfully${NC}"
-    echo -e "${YELLOW}Note: Data volume was preserved. Delete it manually from AWS console if needed.${NC}"
+    echo -e "${RED}Destroying resources (excluding backup module with S3 buckets)...${NC}"
+    
+    # Destroy everything except the backup module
+    terraform destroy \
+        -target=module.compute \
+        -target=module.iam \
+        -target=module.network \
+        -target=module.security \
+        -target=module.scripts \
+        -target=aws_key_pair.validator \
+        -target=aws_placement_group.cluster \
+        -var-file="terraform.tfvars" \
+        -auto-approve
+    
+    echo -e "${GREEN}EC2 and EBS resources destroyed successfully${NC}"
+    echo -e "${GREEN}S3 buckets and data preserved${NC}"
 else
     echo -e "${GREEN}Destroy cancelled${NC}"
     exit 0
